@@ -44,8 +44,8 @@ body {
 const svg = d3.select("#chart");
 const margin = {top:20,right:60,bottom:70,left:80};
 
-const width = 1000 - margin.left - margin.right; // 860
-const height = 420 - margin.top - margin.bottom; // 330
+const width = 1000 - margin.left - margin.right;
+const height = 420 - margin.top - margin.bottom;
 
 const g = svg.append("g")
   .attr("transform", `translate(${margin.left},${margin.top})`);
@@ -134,18 +134,11 @@ const color = d3.scaleLinear()
   .range(["rgba(255,255,255,0)","rgba(120,120,140,0.4)","rgba(60,60,80,0.8)"]);
 
 // bilinear interpolation helper
-function interp(a,b,t){ 
-  return a + (b-a)*t; 
-}
+function interp(a,b,t){ return a + (b-a)*t; }
 
 async function loadClouds(){
 
-  const samples = 12; // ↓ reduced from 25
-
-  const vars = levels.map(l=>"cloudcover_"+l.p).join(",");
-
-  // --- BUILD ALL REQUESTS FIRST ---
-  const requests = [];
+  let field = [];
 
   for(let i=0;i<samples;i++){
     const t = i/(samples-1);
@@ -153,18 +146,12 @@ async function loadClouds(){
     const lat = start.lat + (end.lat-start.lat)*t;
     const lon = start.lon + (end.lon-start.lon)*t;
 
+    const vars = levels.map(l=>"cloudcover_"+l.p).join(",");
+
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&forecast_days=1`;
 
-    requests.push(fetch(url).then(r=>r.json()));
-  }
-
-  // --- PARALLEL FETCH ---
-  const responses = await Promise.all(requests);
-
-  let field = [];
-
-  responses.forEach((data,i)=>{
-    const t = i/(samples-1);
+    const res = await fetch(url);
+    const data = await res.json();
 
     let column = [];
 
@@ -179,22 +166,11 @@ async function loadClouds(){
       time: t*70,
       column
     });
-  });
-
-  // --- DRAW (lower resolution = faster) ---
-  const dy = 20; // ↑ bigger step = fewer rectangles
-
-  function interp(a,b,t){ return a + (b-a)*t; }
-
-  function getVal(col, alt){
-    for(let j=0;j<col.length-1;j++){
-      if(alt>=col[j].fl && alt<=col[j+1].fl){
-        const t = (alt-col[j].fl)/(col[j+1].fl-col[j].fl);
-        return interp(col[j].val, col[j+1].val, t);
-      }
-    }
-    return 0;
   }
+
+  // --- DRAW INTERPOLATED FIELD ---
+  const dx = 5;
+  const dy = 10;
 
   for(let i=0;i<field.length-1;i++){
 
@@ -203,8 +179,20 @@ async function loadClouds(){
 
     for(let alt=0; alt<=500; alt+=dy){
 
+      // find surrounding levels
+      function getVal(col, alt){
+        for(let j=0;j<col.length-1;j++){
+          if(alt>=col[j].fl && alt<=col[j+1].fl){
+            const t = (alt-col[j].fl)/(col[j+1].fl-col[j].fl);
+            return interp(col[j].val, col[j+1].val, t);
+          }
+        }
+        return 0;
+      }
+
       const v1 = getVal(c1.column, alt);
       const v2 = getVal(c2.column, alt);
+
       const v = (v1+v2)/2;
 
       g.append("rect")
@@ -216,7 +204,6 @@ async function loadClouds(){
     }
   }
 }
-
 
 loadClouds();
 
