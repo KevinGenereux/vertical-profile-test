@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>SIGWX Vertical Profile</title>
+<title>SIGWX Vertical Profile with Turbulence, Precip & Icing</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 
 <style>
@@ -24,20 +24,39 @@ body {
 
 .flight-path {
   stroke: black;
-  stroke-width: 2;
+  stroke-width: 3;
   fill: none;
 }
 
 .marker {
   fill: red;
+  font-weight: bold;
   font-size: 11px;
   text-anchor: middle;
 }
 
+/* Turbulence */
+.turb-symbol {
+  font-size: 18px;
+  font-weight: bold;
+  fill: #d35400;
+}
+
+/* Icing */
+.icing-symbol {
+  font-size: 14px;
+  fill: #00e5ff;
+}
+
+.legend text { font-size: 10px; }
 </style>
 </head>
 
 <body>
+<div style="padding: 10px; font-weight: bold;">
+Flight Weather Profile: CYYZ → CYUL
+</div>
+
 <svg id="chart" width="1000" height="420"></svg>
 
 <script>
@@ -80,45 +99,41 @@ g.append("g")
       })
   );
 
-// ICAO labels
+// Labels
 g.append("text").attr("x",x(0)).attr("y",height+35).text("CYYZ");
 g.append("text").attr("x",x(70)).attr("y",height+35).attr("text-anchor","end").text("CYUL");
 
-// --- FLIGHT PROFILE ---
-const totalTime = 70;
-const climbEnd = totalTime*0.1;
-const descentStart = totalTime*0.9;
+// --- COLOR SCALES ---
+const cloudColor = d3.scaleLinear()
+  .domain([0, 50, 100])
+  .range(["rgba(255,255,255,0)", "rgba(140,140,160,0.3)", "rgba(80,80,100,0.7)"]);
 
-const flightData = [
-  {time:0, alt:0},
-  {time:climbEnd, alt:350},
-  {time:descentStart, alt:350},
-  {time:totalTime, alt:0}
-];
+const turbColor = d3.scaleLinear()
+  .domain([20, 40, 60])
+  .range(["rgba(255,255,0,0)", "rgba(255,165,0,0.4)", "rgba(255,0,0,0.5)"])
+  .clamp(true);
 
-const line = d3.line()
-  .x(d=>x(d.time))
-  .y(d=>y(d.alt));
+const precipColor = d3.scaleLinear()
+  .domain([0, 2, 10])
+  .range([
+    "rgba(0,0,255,0)",
+    "rgba(0,150,255,0.3)",
+    "rgba(0,0,200,0.6)"
+  ])
+  .clamp(true);
 
-g.append("path")
-  .datum(flightData)
-  .attr("class","flight-path")
-  .attr("d",line);
+const icingColor = d3.scaleLinear()
+  .domain([0, 1])
+  .range([
+    "rgba(0,255,255,0)",
+    "rgba(255,0,255,0.35)"
+  ]);
 
-// TOC / TOD
-g.append("circle").attr("cx",x(climbEnd)).attr("cy",y(350)).attr("r",4).attr("fill","red");
-g.append("text").attr("x",x(climbEnd)).attr("y",y(350)-10).attr("class","marker").text("TOC");
-
-g.append("circle").attr("cx",x(descentStart)).attr("cy",y(350)).attr("r",4).attr("fill","red");
-g.append("text").attr("x",x(descentStart)).attr("y",y(350)-10).attr("class","marker").text("TOD");
-
-// --- GREAT CIRCLE ---
+// ROUTE
 const start = {lat:43.6777, lon:-79.6248};
 const end   = {lat:45.4706, lon:-73.7408};
+const samples = 15;
 
-const samples = 25;
-
-// PRESSURE → FL mapping
 const levels = [
   {p:"1000hPa", fl:30},
   {p:"925hPa",  fl:70},
@@ -128,85 +143,185 @@ const levels = [
   {p:"500hPa",  fl:500}
 ];
 
-// color scale
-const color = d3.scaleLinear()
-  .domain([0,50,100])
-  .range(["rgba(255,255,255,0)","rgba(120,120,140,0.4)","rgba(60,60,80,0.8)"]);
-
-// bilinear interpolation helper
 function interp(a,b,t){ return a + (b-a)*t; }
 
-async function loadClouds(){
-
+async function loadWeather(){
   let field = [];
 
-  for(let i=0;i<samples;i++){
+  for(let i=0; i<samples; i++){
     const t = i/(samples-1);
-
     const lat = start.lat + (end.lat-start.lat)*t;
     const lon = start.lon + (end.lon-start.lon)*t;
 
-    const vars = levels.map(l=>"cloudcover_"+l.p).join(",");
+    const cVars = levels.map(l=>"cloudcover_"+l.p).join(",");
+    const wVars = levels.map(l=>"windspeed_"+l.p).join(",");
+    const tVars = levels.map(l=>"temperature_"+l.p).join(",");
+    const pVars = "precipitation";
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&forecast_days=1`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${cVars},${wVars},${tVars},${pVars}&wind_speed_unit=kn&forecast_days=1`;
 
-    const res = await fetch(url);
-    const data = await res.json();
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
 
-    let column = [];
+      let column = [];
 
-    levels.forEach(l=>{
-      column.push({
-        fl: l.fl,
-        val: data.hourly["cloudcover_"+l.p][0]
+      levels.forEach(l=>{
+        column.push({
+          fl: l.fl,
+          cloud: data.hourly["cloudcover_"+l.p][0],
+          wind: data.hourly["windspeed_"+l.p][0],
+          temp: data.hourly["temperature_"+l.p][0]
+        });
       });
-    });
 
-    field.push({
-      time: t*70,
-      column
-    });
+      const precip = data.hourly.precipitation[0];
+
+      field.push({ time: t*70, column, precip });
+
+    } catch(e) {
+      console.error("Fetch error", e);
+    }
   }
 
-  // --- DRAW INTERPOLATED FIELD ---
-  const dx = 5;
-  const dy = 10;
+  drawWeather(field);
+}
 
-  for(let i=0;i<field.length-1;i++){
+function drawWeather(field) {
+  const dy = 20;
 
+  for(let i=0; i<field.length-1; i++){
     const c1 = field[i];
     const c2 = field[i+1];
 
+    const xPos = x(c1.time);
+    const rectWidth = x(c2.time) - x(c1.time) + 1;
+
     for(let alt=0; alt<=500; alt+=dy){
 
-      // find surrounding levels
-      function getVal(col, alt){
-        for(let j=0;j<col.length-1;j++){
+      const getVals = (col, alt) => {
+        for(let j=0; j<col.length-1; j++){
           if(alt>=col[j].fl && alt<=col[j+1].fl){
             const t = (alt-col[j].fl)/(col[j+1].fl-col[j].fl);
-            return interp(col[j].val, col[j+1].val, t);
+            return {
+              cloud: interp(col[j].cloud, col[j+1].cloud, t),
+              wind: interp(col[j].wind, col[j+1].wind, t),
+              temp: interp(col[j].temp, col[j+1].temp, t)
+            };
           }
         }
-        return 0;
+        return {cloud:0, wind:0, temp:0};
+      };
+
+      const v1 = getVals(c1.column, alt);
+      const v2 = getVals(c2.column, alt);
+
+      const avgCloud = (v1.cloud + v2.cloud) / 2;
+      const avgWind  = (v1.wind + v2.wind) / 2;
+      const avgTemp  = (v1.temp + v2.temp) / 2;
+      const avgPrecip = (c1.precip + c2.precip) / 2;
+
+      // CLOUD
+      g.append("rect")
+        .attr("x", xPos)
+        .attr("y", y(alt+dy))
+        .attr("width", rectWidth)
+        .attr("height", Math.abs(y(alt) - y(alt+dy)))
+        .attr("fill", cloudColor(avgCloud));
+
+      // PRECIP
+      if (avgPrecip > 0.1) {
+        g.append("rect")
+          .attr("x", xPos)
+          .attr("y", y(alt+dy))
+          .attr("width", rectWidth)
+          .attr("height", Math.abs(y(alt) - y(alt+dy)))
+          .attr("fill", precipColor(avgPrecip));
       }
 
-      const v1 = getVal(c1.column, alt);
-      const v2 = getVal(c2.column, alt);
+      // TURBULENCE
+      if (avgWind > 25) {
+        g.append("rect")
+          .attr("x", xPos)
+          .attr("y", y(alt+dy))
+          .attr("width", rectWidth)
+          .attr("height", Math.abs(y(alt) - y(alt+dy)))
+          .attr("fill", turbColor(avgWind));
+      }
 
-      const v = (v1+v2)/2;
+      // ICING
+      const icing =
+        avgCloud > 60 &&
+        avgTemp <= 0 &&
+        avgTemp >= -20;
 
-      g.append("rect")
-        .attr("x", x(c1.time))
-        .attr("y", y(alt+dy))
-        .attr("width", x(c2.time)-x(c1.time)+1)
-        .attr("height", y(alt)-y(alt+dy))
-        .attr("fill", color(v));
+      if (icing) {
+        g.append("rect")
+          .attr("x", xPos)
+          .attr("y", y(alt+dy))
+          .attr("width", rectWidth)
+          .attr("height", Math.abs(y(alt) - y(alt+dy)))
+          .attr("fill", icingColor(1));
+      }
+
+      // TURB SYMBOL
+      if (avgWind > 45 && i % 2 === 0 && alt % 60 === 0) {
+        g.append("text")
+          .attr("x", xPos + rectWidth/2)
+          .attr("y", y(alt))
+          .attr("class", "turb-symbol")
+          .attr("text-anchor", "middle")
+          .text("^");
+      }
+
+      // ICING SYMBOL
+      if (icing && i % 3 === 0 && alt % 80 === 0) {
+        g.append("text")
+          .attr("x", xPos + rectWidth/2)
+          .attr("y", y(alt))
+          .attr("class", "icing-symbol")
+          .attr("text-anchor", "middle")
+          .text("❄");
+      }
     }
   }
+
+  drawFlightPath();
 }
 
-loadClouds();
+function drawFlightPath() {
+  const flightData = [
+    {time:0, alt:0},
+    {time:7, alt:350},
+    {time:63, alt:350},
+    {time:70, alt:0}
+  ];
 
+  const line = d3.line()
+    .x(d=>x(d.time))
+    .y(d=>y(d.alt));
+
+  g.append("path")
+    .datum(flightData)
+    .attr("class","flight-path")
+    .attr("d",line);
+
+  [[7, "TOC"], [63, "TOD"]].forEach(pt => {
+    g.append("circle")
+      .attr("cx",x(pt[0]))
+      .attr("cy",y(350))
+      .attr("r",4)
+      .attr("fill","red");
+
+    g.append("text")
+      .attr("x",x(pt[0]))
+      .attr("y",y(350)-10)
+      .attr("class","marker")
+      .text(pt[1]);
+  });
+}
+
+loadWeather();
 </script>
 </body>
 </html>
