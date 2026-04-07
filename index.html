@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SIGWX Vertical Profile</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<style>
+body {
+  margin: 0;
+  background: #eef2f6;
+  font-family: "Courier New", monospace;
+}
+
+.axis text { font-size: 12px; }
+
+.grid line {
+  stroke: #cfd6dd;
+}
+
+.grid-vertical line {
+  stroke-dasharray: 4,4;
+}
+
+.flight-path {
+  stroke: black;
+  stroke-width: 2;
+  fill: none;
+}
+
+.marker {
+  fill: red;
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+</style>
+</head>
+
+<body>
+<svg id="chart" width="1000" height="420"></svg>
+
+<script>
+const svg = d3.select("#chart");
+const margin = {top:20,right:60,bottom:70,left:80};
+
+const width = 1000 - margin.left - margin.right; // 860
+const height = 420 - margin.top - margin.bottom; // 330
+
+const g = svg.append("g")
+  .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const y = d3.scaleLinear().domain([0,500]).range([height,0]);
+const x = d3.scaleLinear().domain([-5,75]).range([0,width]);
+
+// GRID
+g.append("g")
+  .attr("class","grid")
+  .call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickSize(-width).tickFormat(""));
+
+g.append("g")
+  .attr("class","grid grid-vertical")
+  .attr("transform",`translate(0,${height})`)
+  .call(d3.axisBottom(x).tickValues(d3.range(0,71,10)).tickSize(-height).tickFormat(""));
+
+// AXES
+g.append("g")
+  .call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickFormat(d=>"FL"+d));
+
+const startTime = new Date(Date.now() + 6*3600000);
+
+g.append("g")
+  .attr("transform",`translate(0,${height})`)
+  .call(
+    d3.axisBottom(x)
+      .tickValues(d3.range(0,71,10))
+      .tickFormat(d=>{
+        const t = new Date(startTime.getTime()+d*60000);
+        return t.toISOString().substring(11,16)+"Z";
+      })
+  );
+
+// ICAO labels
+g.append("text").attr("x",x(0)).attr("y",height+35).text("CYYZ");
+g.append("text").attr("x",x(70)).attr("y",height+35).attr("text-anchor","end").text("CYUL");
+
+// --- FLIGHT PROFILE ---
+const totalTime = 70;
+const climbEnd = totalTime*0.1;
+const descentStart = totalTime*0.9;
+
+const flightData = [
+  {time:0, alt:0},
+  {time:climbEnd, alt:350},
+  {time:descentStart, alt:350},
+  {time:totalTime, alt:0}
+];
+
+const line = d3.line()
+  .x(d=>x(d.time))
+  .y(d=>y(d.alt));
+
+g.append("path")
+  .datum(flightData)
+  .attr("class","flight-path")
+  .attr("d",line);
+
+// TOC / TOD
+g.append("circle").attr("cx",x(climbEnd)).attr("cy",y(350)).attr("r",4).attr("fill","red");
+g.append("text").attr("x",x(climbEnd)).attr("y",y(350)-10).attr("class","marker").text("TOC");
+
+g.append("circle").attr("cx",x(descentStart)).attr("cy",y(350)).attr("r",4).attr("fill","red");
+g.append("text").attr("x",x(descentStart)).attr("y",y(350)-10).attr("class","marker").text("TOD");
+
+// --- GREAT CIRCLE ---
+const start = {lat:43.6777, lon:-79.6248};
+const end   = {lat:45.4706, lon:-73.7408};
+
+const samples = 25;
+
+// PRESSURE → FL mapping
+const levels = [
+  {p:"1000hPa", fl:30},
+  {p:"925hPa",  fl:70},
+  {p:"850hPa",  fl:150},
+  {p:"700hPa",  fl:300},
+  {p:"600hPa",  fl:400},
+  {p:"500hPa",  fl:500}
+];
+
+// color scale
+const color = d3.scaleLinear()
+  .domain([0,50,100])
+  .range(["rgba(255,255,255,0)","rgba(120,120,140,0.4)","rgba(60,60,80,0.8)"]);
+
+// bilinear interpolation helper
+function interp(a,b,t){ 
+  return a + (b-a)*t; 
+}
+
+async function loadClouds(){
+
+  const samples = 12; // ↓ reduced from 25
+
+  const vars = levels.map(l=>"cloudcover_"+l.p).join(",");
+
+  // --- BUILD ALL REQUESTS FIRST ---
+  const requests = [];
+
+  for(let i=0;i<samples;i++){
+    const t = i/(samples-1);
+
+    const lat = start.lat + (end.lat-start.lat)*t;
+    const lon = start.lon + (end.lon-start.lon)*t;
+
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&forecast_days=1`;
+
+    requests.push(fetch(url).then(r=>r.json()));
+  }
+
+  // --- PARALLEL FETCH ---
+  const responses = await Promise.all(requests);
+
+  let field = [];
+
+  responses.forEach((data,i)=>{
+    const t = i/(samples-1);
+
+    let column = [];
+
+    levels.forEach(l=>{
+      column.push({
+        fl: l.fl,
+        val: data.hourly["cloudcover_"+l.p][0]
+      });
+    });
+
+    field.push({
+      time: t*70,
+      column
+    });
+  });
+
+  // --- DRAW (lower resolution = faster) ---
+  const dy = 20; // ↑ bigger step = fewer rectangles
+
+  function interp(a,b,t){ return a + (b-a)*t; }
+
+  function getVal(col, alt){
+    for(let j=0;j<col.length-1;j++){
+      if(alt>=col[j].fl && alt<=col[j+1].fl){
+        const t = (alt-col[j].fl)/(col[j+1].fl-col[j].fl);
+        return interp(col[j].val, col[j+1].val, t);
+      }
+    }
+    return 0;
+  }
+
+  for(let i=0;i<field.length-1;i++){
+
+    const c1 = field[i];
+    const c2 = field[i+1];
+
+    for(let alt=0; alt<=500; alt+=dy){
+
+      const v1 = getVal(c1.column, alt);
+      const v2 = getVal(c2.column, alt);
+      const v = (v1+v2)/2;
+
+      g.append("rect")
+        .attr("x", x(c1.time))
+        .attr("y", y(alt+dy))
+        .attr("width", x(c2.time)-x(c1.time)+1)
+        .attr("height", y(alt)-y(alt+dy))
+        .attr("fill", color(v));
+    }
+  }
+}
+
+
+loadClouds();
+
+</script>
+</body>
+</html>
