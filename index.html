@@ -15,7 +15,7 @@ body {
 /* Legend Styles */
 #legend-container {
   display: flex;
-  gap: 20px;
+  gap: 15px;
   padding: 10px 20px;
   align-items: center;
   font-family: Arial, sans-serif;
@@ -28,7 +28,7 @@ body {
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
   user-select: none;
 }
@@ -107,27 +107,40 @@ body {
 <div id="legend-container">
   <label class="legend-item">
     <input type="checkbox" id="chk-cloud" checked>
-    <div class="legend-box" style="background: rgba(80,80,100,0.6);"></div> Cloud Cover
+    <div class="legend-box" style="background: rgba(80,80,100,0.6);"></div> Cloud
   </label>
   <label class="legend-item">
     <input type="checkbox" id="chk-precip" checked>
-    <div class="legend-box" style="background: rgba(0,0,200,0.6);"></div> Precipitation
+    <div class="legend-box" style="background: rgba(0,0,200,0.6);"></div> Precip
   </label>
   <label class="legend-item">
     <input type="checkbox" id="chk-turb" checked>
-    <div class="legend-box" style="background: rgba(255,165,0,0.2); border-color:#d35400;"></div> Turbulence (^)
+    <div class="legend-box" style="background: rgba(255,165,0,0.2); border-color:#d35400;"></div> Turb (^)
   </label>
   <label class="legend-item">
     <input type="checkbox" id="chk-icing" checked>
     <div class="legend-box" style="background: rgba(0,255,255,0.2); border-color:#0088cc;"></div> Icing (❄)
   </label>
   <label class="legend-item">
+    <input type="checkbox" id="chk-vis" checked>
+    <div class="legend-box" style="background: rgba(255,0,0,0.5); border-color:magenta;"></div> Sfc Vis
+  </label>
+  <label class="legend-item">
+    <input type="checkbox" id="chk-terrain" checked>
+    <div class="legend-box" style="background: #8b7355; border: none;"></div> Terrain
+  </label>
+  <label class="legend-item">
+    <input type="checkbox" id="chk-wind" checked>
+    <svg width="24" height="20" style="margin-left:2px;"><g transform="translate(12,18) rotate(20)"><line x1="0" y1="0" x2="0" y2="-15" stroke="#8e44ad" stroke-width="2"></line><polygon points="0,-15 8,-13 0,-10" fill="#8e44ad"></polygon></g></svg>
+    Wind/Jets
+  </label>
+  <label class="legend-item" style="margin-left: 10px;">
     <input type="checkbox" id="chk-freeze" checked>
-    <div class="legend-dash"></div> Freezing Line
+    <div class="legend-dash"></div> Freezing
   </label>
   <label class="legend-item">
     <input type="checkbox" id="chk-path" checked>
-    <div class="legend-line"></div> Flight Path
+    <div class="legend-line"></div> Path
   </label>
 </div>
 
@@ -137,7 +150,7 @@ body {
 
 // ========= CONFIG =========
 const startICAO = "CYQT";
-const endICAO   = "KFNT";
+const endICAO   = "CYUL";
 const flightMinutes = 120; 
 // ==========================
 
@@ -154,79 +167,63 @@ const x = d3.scaleLinear().domain([0, flightMinutes]).range([0,width]);
 const tickValues = d3.range(0, 11).map(i => i * (flightMinutes / 10));
 
 // ========= SVG LAYER GROUPS (Z-INDEXING) =========
-// By separating into distinct <g> tags, we ensure lines stay on top of weather,
-// and we can clear specific layers without destroying the axes.
-const gGrid = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-const gWeatherBg = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gGrid       = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gWeatherBg  = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gTerrain    = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gVis        = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`); // Visibility Overlay
 const gWeatherSym = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-const gLines = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-const gAxes = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gWind       = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gLines      = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+const gAxes       = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
 // ========= INITIALIZE STATIC GRIDS & AXES =========
-gGrid.append("g")
-  .attr("class","grid")
-  .call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickSize(-width).tickFormat(""));
+gGrid.append("g").attr("class","grid").call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickSize(-width).tickFormat(""));
+gGrid.append("g").attr("class","grid grid-vertical").attr("transform",`translate(0,${height})`).call(d3.axisBottom(x).tickValues(tickValues).tickSize(-height).tickFormat(""));
 
-gGrid.append("g")
-  .attr("class","grid grid-vertical")
-  .attr("transform",`translate(0,${height})`)
-  .call(d3.axisBottom(x).tickValues(tickValues).tickSize(-height).tickFormat(""));
-
-gAxes.append("g")
-  .call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickFormat(d=>"FL"+d));
+gAxes.append("g").call(d3.axisLeft(y).tickValues(d3.range(0,501,100)).tickFormat(d=>"FL"+d));
 
 const startTime = new Date(Date.now() + 6*3600000);
-gAxes.append("g")
-  .attr("transform",`translate(0,${height})`)
-  .call(
-    d3.axisBottom(x)
-      .tickValues(tickValues)
-      .tickFormat(d=>{
-        const t = new Date(startTime.getTime()+d*60000);
-        return t.toISOString().substring(11,16)+"Z";
-      })
-  );
+gAxes.append("g").attr("transform",`translate(0,${height})`).call(
+    d3.axisBottom(x).tickValues(tickValues).tickFormat(d=>{
+      const t = new Date(startTime.getTime()+d*60000);
+      return t.toISOString().substring(11,16)+"Z";
+    })
+);
 
 // AXIS LABELS
-gAxes.append("text")
-  .attr("class", "axis-label")
-  .attr("transform", "rotate(-90)")
-  .attr("y", 0 - margin.left + 30) 
-  .attr("x", 0 - (height / 2))
-  .attr("dy", "1em")
-  .style("text-anchor", "middle")
-  .text("Altitude (Flight Level)");
+gAxes.append("text").attr("class", "axis-label").attr("transform", "rotate(-90)").attr("y", -margin.left + 30).attr("x", -(height / 2)).attr("dy", "1em").style("text-anchor", "middle").text("Altitude (Flight Level)");
+gAxes.append("text").attr("class", "axis-label").attr("transform", `translate(${width / 2}, ${height + margin.bottom - 10})`).style("text-anchor", "middle").text("Time (UTC)");
 
-gAxes.append("text")
-  .attr("class", "axis-label")
-  .attr("transform", `translate(${width / 2}, ${height + margin.bottom - 10})`)
-  .style("text-anchor", "middle")
-  .text("Time (UTC)");
-
-// ICAO PLACEHOLDERS (Updated once data loads)
 const txtStart = gAxes.append("text").attr("x", x(0)).attr("y", height + 35).attr("text-anchor","middle").style("font-family", "Arial, sans-serif");
 const txtEnd = gAxes.append("text").attr("x", x(flightMinutes)).attr("y", height + 35).attr("text-anchor","middle").style("font-family", "Arial, sans-serif");
-
 
 // COLOR SCALES
 const cloudColor = d3.scaleLinear().domain([0,50,100]).range(["rgba(255,255,255,0)", "rgba(140,140,160,0.3)", "rgba(80,80,100,0.7)"]);
 const precipColor = d3.scaleLinear().domain([0,2,10]).range(["rgba(0,0,255,0)", "rgba(0,150,255,0.3)", "rgba(0,0,200,0.6)"]).clamp(true);
-
-// Fainter background washes for hazards to prevent visual overlapping mud
 const turbColor = d3.scaleLinear().domain([20,40,80]).range(["rgba(255,165,0,0)", "rgba(255,165,0,0.15)", "rgba(255,69,0,0.25)"]).clamp(true);
 const icingColor = d3.scaleLinear().domain([0,1]).range(["rgba(0,255,255,0)", "rgba(0,255,255,0.15)"]);
 
+// Standard Aviation Flight Rule Visibility Thresholds (in meters)
+const visColor = d3.scaleThreshold()
+  .domain([1600, 4800, 8000]) // LIFR, IFR, MVFR
+  .range([
+    "rgba(255,0,255,0.6)", // < 1600m : LIFR (Magenta)
+    "rgba(255,0,0,0.5)",   // 1600 - 4800m : IFR (Red)
+    "rgba(0,0,255,0.4)",   // 4800 - 8000m : MVFR (Blue)
+    "rgba(0,0,0,0)"        // > 8000m : VFR (Transparent/Clear)
+  ]);
+
 const samples = 15;
 const levels = [
-  {p:"1000hPa", fl:30}, {p:"925hPa",  fl:70}, {p:"850hPa",  fl:150},
-  {p:"700hPa",  fl:300}, {p:"600hPa",  fl:400}, {p:"500hPa",  fl:500}
+  {p:"1000hPa", fl:30}, {p:"925hPa", fl:70}, {p:"850hPa", fl:150},
+  {p:"700hPa", fl:300}, {p:"600hPa", fl:400}, {p:"500hPa", fl:500}
 ];
 
 function interp(a,b,t){ return a + (b-a)*t; }
 
 // ========= FILE LOAD =========
 function loadAirportsFromFile(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = function(e) {
       const data = d3.csvParse(e.target.result);
@@ -248,9 +245,11 @@ async function loadWeather(start, end){
 
     const cVars = levels.map(l=>"cloudcover_"+l.p).join(",");
     const wVars = levels.map(l=>"windspeed_"+l.p).join(",");
+    const dVars = levels.map(l=>"winddirection_"+l.p).join(",");
     const tVars = levels.map(l=>"temperature_"+l.p).join(",");
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${cVars},${wVars},${tVars},precipitation&wind_speed_unit=kn&forecast_days=1`;
+    // ADDED visibility to the API call
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${cVars},${wVars},${dVars},${tVars},precipitation,visibility&wind_speed_unit=kn&forecast_days=1`;
     const res = await fetch(url);
     const data = await res.json();
 
@@ -260,54 +259,153 @@ async function loadWeather(start, end){
         fl: l.fl,
         cloud: data.hourly["cloudcover_"+l.p][0],
         wind: data.hourly["windspeed_"+l.p][0],
+        windDir: data.hourly["winddirection_"+l.p][0],
         temp: data.hourly["temperature_"+l.p][0]
       });
     });
+    
+    // API elevation in meters. 1m = 3.28ft / 100 = FL
+    const elevationFL = (data.elevation * 3.28084) / 100;
 
-    field.push({ time: t * flightMinutes, column, precip: data.hourly.precipitation[0] });
+    field.push({ 
+      time: t * flightMinutes, 
+      column, 
+      precip: data.hourly.precipitation[0], 
+      elevationFL,
+      vis: data.hourly.visibility[0] // Parsed visibility
+    });
   }
 
-  // Cache data and trigger initial render
   globalWeatherData = field;
   txtStart.text(startICAO);
   txtEnd.text(endICAO);
   renderAllLayers();
 }
 
-
 // ========= REDRAW CONTROLLER =========
 function renderAllLayers() {
   if (globalWeatherData.length === 0) return;
 
   gWeatherBg.selectAll("*").remove();
+  gTerrain.selectAll("*").remove();
+  gVis.selectAll("*").remove();
   gWeatherSym.selectAll("*").remove();
+  gWind.selectAll("*").remove();
   gLines.selectAll("*").remove();
 
   drawWeather(globalWeatherData);
   
+  if (document.getElementById("chk-terrain").checked) drawTerrain(globalWeatherData);
+  if (document.getElementById("chk-vis").checked) drawVisibility(globalWeatherData);
+  if (document.getElementById("chk-wind").checked) drawWindBarbs(globalWeatherData);
   if (document.getElementById("chk-freeze").checked) drawFreezingLine(globalWeatherData);
   if (document.getElementById("chk-path").checked) drawFlightPath();
 }
 
-// Attach event listeners to checkboxes
 document.querySelectorAll('.legend-item input').forEach(chk => {
   chk.addEventListener('change', renderAllLayers);
 });
 
 
-// ========= RENDER WEATHER =========
+// ========= RENDER TERRAIN =========
+function drawTerrain(field) {
+  const area = d3.area()
+    .x(d => x(d.time))
+    .y0(y(0))
+    .y1(d => y(Math.max(d.elevationFL, 0))); 
+
+  gTerrain.append("path")
+    .datum(field)
+    .attr("d", area)
+    .attr("fill", "#8b7355")
+    .attr("opacity", 0.8)
+    .attr("stroke", "#5c4a35")
+    .attr("stroke-width", 1.5);
+}
+
+// ========= RENDER SURFACE VISIBILITY =========
+function drawVisibility(field) {
+  const fogThicknessFL = 30; // Vis layer extends 3000 ft (FL30) above the ground
+
+  for (let i = 0; i < field.length - 1; i++) {
+    const c1 = field[i];
+    const c2 = field[i+1];
+
+    const avgVis = (c1.vis + c2.vis) / 2;
+    if (avgVis > 8000) continue; // Skip rendering transparent VFR blocks
+
+    // Create a polygon that perfectly drapes over the terrain profile
+    const pts = [
+      [x(c1.time), y(Math.max(c1.elevationFL, 0))],
+      [x(c1.time), y(Math.max(c1.elevationFL, 0) + fogThicknessFL)],
+      [x(c2.time), y(Math.max(c2.elevationFL, 0) + fogThicknessFL)],
+      [x(c2.time), y(Math.max(c2.elevationFL, 0))]
+    ];
+
+    gVis.append("polygon")
+      .attr("points", pts.map(p => p.join(",")).join(" "))
+      .attr("fill", visColor(avgVis));
+  }
+}
+
+// ========= RENDER WIND BARBS =========
+function drawWindBarbs(field) {
+  field.forEach((col, i) => {
+    if (i % 2 !== 0) return; 
+    col.column.forEach(cell => {
+      if (cell.fl < col.elevationFL) return; 
+      drawSingleBarb(gWind, x(col.time), y(cell.fl), cell.wind, cell.windDir);
+    });
+  });
+}
+
+function drawSingleBarb(group, px, py, speed, dir) {
+  if (speed < 5) {
+    group.append("circle").attr("cx", px).attr("cy", py).attr("r", 2.5).attr("fill", "#444");
+    return;
+  }
+
+  const isJet = speed >= 80;
+  const color = isJet ? "#8e44ad" : "#333";
+  const strkW = isJet ? 2 : 1.5;
+
+  const barbG = group.append("g")
+    .attr("transform", `translate(${px},${py}) rotate(${dir})`)
+    .attr("stroke", color)
+    .attr("stroke-width", strkW)
+    .attr("fill", "none");
+
+  barbG.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", -35);
+
+  let remain = speed;
+  let currY = -35;
+  const barbLen = 10;
+  
+  while (remain >= 50) {
+    barbG.append("polygon").attr("points", `0,${currY} ${barbLen},${currY + 2} 0,${currY + 5}`).attr("fill", color);
+    currY += 7; remain -= 50;
+  }
+  while (remain >= 10) {
+    barbG.append("line").attr("x1", 0).attr("y1", currY).attr("x2", barbLen).attr("y2", currY - 3);
+    currY += 4; remain -= 10;
+  }
+  if (remain >= 5) {
+    barbG.append("line").attr("x1", 0).attr("y1", currY).attr("x2", barbLen / 2).attr("y2", currY - 1.5);
+  }
+  
+  group.append("circle").attr("cx", px).attr("cy", py).attr("r", isJet ? 2.5 : 1.5).attr("fill", color);
+}
+
+// ========= RENDER WEATHER BLOCKS =========
 function drawWeather(field) {
   const dy = 20;
-
-  // Read toggle states
   const showCloud = document.getElementById("chk-cloud").checked;
   const showPrecip = document.getElementById("chk-precip").checked;
   const showTurb = document.getElementById("chk-turb").checked;
   const showIcing = document.getElementById("chk-icing").checked;
 
   for(let i=0; i<field.length-1; i++){
-    const c1 = field[i];
-    const c2 = field[i+1];
+    const c1 = field[i], c2 = field[i+1];
     const xPos = x(c1.time);
     const rectWidth = x(c2.time) - x(c1.time) + 1;
 
@@ -328,9 +426,7 @@ function drawWeather(field) {
         return {cloud:0, wind:0, temp:0};
       };
 
-      const v1 = getVals(c1.column, alt);
-      const v2 = getVals(c2.column, alt);
-
+      const v1 = getVals(c1.column, alt), v2 = getVals(c2.column, alt);
       const avgCloud = (v1.cloud + v2.cloud) / 2;
       const avgWind  = (v1.wind + v2.wind) / 2;
       const avgTemp  = (v1.temp + v2.temp) / 2;
@@ -338,39 +434,29 @@ function drawWeather(field) {
       
       const isIcing = (avgCloud > 60 && avgTemp <= 0 && avgTemp >= -20);
 
-      // Helper to draw background rectangles
       const drawRect = (color) => {
-        gWeatherBg.append("rect")
-          .attr("x", xPos).attr("y", y(topAlt))
-          .attr("width", rectWidth).attr("height", Math.abs(y(alt) - y(topAlt)))
-          .attr("fill", color);
+        gWeatherBg.append("rect").attr("x", xPos).attr("y", y(topAlt))
+          .attr("width", rectWidth).attr("height", Math.abs(y(alt) - y(topAlt))).attr("fill", color);
       };
 
-      // 1. Solid Backgrounds (Macro Weather)
       if (showCloud) drawRect(cloudColor(avgCloud));
       if (showPrecip && avgPrecip > 0.1) drawRect(precipColor(avgPrecip));
 
-      // 2. Faint Backgrounds + Symbols (Hazards)
       if (showIcing && isIcing) {
         drawRect(icingColor(1));
-        // Add scatter text pattern
         if (i % 3 === 0 && alt % 80 === 0) {
-          gWeatherSym.append("text")
-            .attr("x", xPos + rectWidth/2).attr("y", y(alt))
+          gWeatherSym.append("text").attr("x", xPos + rectWidth/2).attr("y", y(alt))
             .attr("class", "icing-symbol").attr("text-anchor", "middle").text("❄");
         }
       }
 
       if (showTurb && avgWind > 25) {
         drawRect(turbColor(Math.min(avgWind,80)));
-        // Add scatter text pattern
         if (avgWind > 45 && i % 2 === 0 && alt % 60 === 0) {
-          gWeatherSym.append("text")
-            .attr("x", xPos + rectWidth/2).attr("y", y(alt) + 5)
+          gWeatherSym.append("text").attr("x", xPos + rectWidth/2).attr("y", y(alt) + 5)
             .attr("class", "turb-symbol").attr("text-anchor", "middle").text("^");
         }
       }
-
     }
   }
 }
@@ -382,8 +468,7 @@ function drawFreezingLine(field) {
     const col = pt.column;
     let freezingFL = null;
     for (let j = 0; j < col.length - 1; j++) {
-      const t1 = col[j].temp;
-      const t2 = col[j + 1].temp;
+      const t1 = col[j].temp, t2 = col[j + 1].temp;
       if ((t1 >= 0 && t2 <= 0) || (t1 <= 0 && t2 >= 0)) {
         const t = (0 - t1) / (t2 - t1);
         freezingFL = col[j].fl + t * (col[j + 1].fl - col[j].fl);
@@ -398,8 +483,7 @@ function drawFreezingLine(field) {
   });
 
   gLines.append("path")
-    .datum(pts)
-    .attr("class", "freezing-line")
+    .datum(pts).attr("class", "freezing-line")
     .attr("d", d3.line().x(d => x(d.time)).y(d => y(d.alt)));
 }
 
@@ -412,8 +496,7 @@ function drawFlightPath() {
     {time:flightMinutes, alt:0}
   ];
   gLines.append("path")
-    .datum(data)
-    .attr("class","flight-path")
+    .datum(data).attr("class","flight-path")
     .attr("d", d3.line().x(d=>x(d.time)).y(d=>y(d.alt)));
 }
 
