@@ -12,6 +12,42 @@ body {
   font-family: "Courier New", monospace;
 }
 
+/* Legend Styles */
+#legend-container {
+  display: flex;
+  gap: 20px;
+  padding: 10px 20px;
+  align-items: center;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  flex-wrap: wrap;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 10px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-box {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #aaa;
+  border-radius: 2px;
+}
+.legend-line {
+  width: 20px;
+  height: 3px;
+  background: black;
+}
+.legend-dash {
+  width: 20px;
+  height: 0;
+  border-top: 3px dashed #2980b9;
+}
+
+/* Chart Styles */
 .grid line { stroke: #cfd6dd; }
 .grid-vertical line { stroke-dasharray: 4,4; }
 
@@ -37,24 +73,54 @@ body {
 .turb-symbol {
   font-size: 18px;
   fill: #d35400;
+  font-weight: bold;
 }
 
 .icing-symbol {
   font-size: 14px;
   fill: #00e5ff;
 }
+
+.axis-label {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  font-weight: bold;
+  fill: #333;
+}
 </style>
 </head>
 
 <body>
 
-<div style="padding:10px; font-weight:bold;">
+<div style="padding:10px; font-family: Arial, sans-serif; font-size: 18px; font-weight:bold;">
   Flight Weather Profile
 </div>
 
-<div style="padding:10px;">
+<div style="padding: 0 10px 10px 10px; font-family: Arial, sans-serif;">
   Load airports.csv:
   <input type="file" id="fileInput" accept=".csv" />
+</div>
+
+<!-- HTML Based Legend -->
+<div id="legend-container">
+  <div class="legend-item">
+    <div class="legend-box" style="background: rgba(80,80,100,0.6);"></div> Cloud Cover
+  </div>
+  <div class="legend-item">
+    <div class="legend-box" style="background: rgba(0,0,200,0.6);"></div> Precipitation
+  </div>
+  <div class="legend-item">
+    <div class="legend-box" style="background: rgba(255,165,0,0.5);"></div> Turbulence (^)
+  </div>
+  <div class="legend-item">
+    <div class="legend-box" style="background: rgba(255,0,255,0.35);"></div> Icing (❄)
+  </div>
+  <div class="legend-item">
+    <div class="legend-dash"></div> Freezing Line
+  </div>
+  <div class="legend-item">
+    <div class="legend-line"></div> Flight Path
+  </div>
 </div>
 
 <svg id="chart" width="1000" height="420"></svg>
@@ -69,10 +135,12 @@ const flightMinutes = 120; // 🔥 CHANGE THIS FREELY
 
 const svg = d3.select("#chart").style("background","white");
 
-const margin = {top:20,right:60,bottom:70,left:80};
+// Increased left margin slightly to accommodate the Y-axis label comfortably
+const margin = {top: 20, right: 60, bottom: 70, left: 90};
 const width = 1000 - margin.left - margin.right;
 const height = 420 - margin.top - margin.bottom;
 
+// Standard graphics group
 const g = svg.append("g")
   .attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -116,6 +184,28 @@ g.append("g")
         return t.toISOString().substring(11,16)+"Z";
       })
   );
+
+// ==============================
+// AXIS LABELS
+// ==============================
+
+// Y-Axis Label
+g.append("text")
+  .attr("class", "axis-label")
+  .attr("transform", "rotate(-90)")
+  .attr("y", 0 - margin.left + 30) // Position left of the ticks
+  .attr("x", 0 - (height / 2))
+  .attr("dy", "1em")
+  .style("text-anchor", "middle")
+  .text("Altitude (Flight Level)");
+
+// X-Axis Label
+g.append("text")
+  .attr("class", "axis-label")
+  .attr("transform", `translate(${width / 2}, ${height + margin.bottom - 10})`)
+  .style("text-anchor", "middle")
+  .text("Time (UTC)");
+
 
 // COLOR SCALES
 const cloudColor = d3.scaleLinear()
@@ -223,16 +313,19 @@ async function loadWeather(start, end){
   drawFreezingLine(field);
   drawFlightPath();
 
+  // Draw Airport ICAOs right under the axis
   g.append("text")
     .attr("x", x(0))
     .attr("y", height + 35)
     .attr("text-anchor","middle")
+    .style("font-family", "Arial, sans-serif")
     .text(startICAO);
 
   g.append("text")
     .attr("x", x(flightMinutes))
     .attr("y", height + 35)
     .attr("text-anchor","middle")
+    .style("font-family", "Arial, sans-serif")
     .text(endICAO);
 }
 
@@ -293,8 +386,9 @@ function drawWeather(field) {
       if (avgWind > 45 && i % 2 === 0 && alt % 60 === 0) {
         g.append("text")
           .attr("x", xPos + rectWidth/2)
-          .attr("y", y(alt))
+          .attr("y", y(alt) + 5)
           .attr("class", "turb-symbol")
+          .attr("text-anchor", "middle")
           .text("^");
       }
 
@@ -303,6 +397,7 @@ function drawWeather(field) {
           .attr("x", xPos + rectWidth/2)
           .attr("y", y(alt))
           .attr("class", "icing-symbol")
+          .attr("text-anchor", "middle")
           .text("❄");
       }
     }
@@ -351,7 +446,6 @@ function drawFreezingLine(field) {
       .y(d => y(d.alt))
     );
 }
-
 
 // ========= FLIGHT PATH =========
 function drawFlightPath() {
