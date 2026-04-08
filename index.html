@@ -2,25 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>SIGWX Vertical Profile with Turbulence, Precip & Icing</title>
+<title>SIGWX Vertical Profile</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 
 <style>
 body {
   margin: 0;
-  background: #eef2f6;
+  background: white;
   font-family: "Courier New", monospace;
 }
 
-.axis text { font-size: 12px; }
-
-.grid line {
-  stroke: #cfd6dd;
-}
-
-.grid-vertical line {
-  stroke-dasharray: 4,4;
-}
+.grid line { stroke: #cfd6dd; }
+.grid-vertical line { stroke-dasharray: 4,4; }
 
 .flight-path {
   stroke: black;
@@ -28,7 +21,6 @@ body {
   fill: none;
 }
 
-/* Freezing Line Style */
 .freezing-line {
   stroke: #2980b9;
   stroke-width: 2;
@@ -38,40 +30,46 @@ body {
 
 .marker {
   fill: red;
-  font-weight: bold;
   font-size: 11px;
   text-anchor: middle;
 }
 
-/* Turbulence */
 .turb-symbol {
   font-size: 18px;
-  font-weight: bold;
   fill: #d35400;
 }
 
-/* Icing */
 .icing-symbol {
   font-size: 14px;
   fill: #00e5ff;
 }
-
-.legend text { font-size: 12px; font-weight: bold; }
 </style>
 </head>
 
 <body>
-<div style="padding: 10px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-  <span>Flight Weather Profile: CYYZ → CYUL</span>
-  <div style="font-size: 12px; color: #2980b9;">- - - Freezing Level (0°C)</div>
+
+<div style="padding:10px; font-weight:bold;">
+  Flight Weather Profile
+</div>
+
+<!-- FILE INPUT (NEW) -->
+<div style="padding:10px;">
+  Load airports.csv:
+  <input type="file" id="fileInput" accept=".csv" />
 </div>
 
 <svg id="chart" width="1000" height="420"></svg>
 
 <script>
-const svg = d3.select("#chart");
-const margin = {top:20,right:60,bottom:70,left:80};
 
+// ========= CONFIG =========
+const startICAO = "CYQT";
+const endICAO   = "CYUL";
+// ==========================
+
+const svg = d3.select("#chart").style("background","white");
+
+const margin = {top:20,right:60,bottom:70,left:80};
 const width = 1000 - margin.left - margin.right;
 const height = 420 - margin.top - margin.bottom;
 
@@ -108,22 +106,18 @@ g.append("g")
       })
   );
 
-// Labels
-g.append("text").attr("x",x(0)).attr("y",height+35).text("CYYZ");
-g.append("text").attr("x",x(70)).attr("y",height+35).attr("text-anchor","end").text("CYUL");
-
-// --- COLOR SCALES ---
+// COLOR SCALES
 const cloudColor = d3.scaleLinear()
-  .domain([0, 50, 100])
+  .domain([0,50,100])
   .range(["rgba(255,255,255,0)", "rgba(140,140,160,0.3)", "rgba(80,80,100,0.7)"]);
 
 const turbColor = d3.scaleLinear()
-  .domain([20, 40, 60])
+  .domain([20,40,80])
   .range(["rgba(255,255,0,0)", "rgba(255,165,0,0.4)", "rgba(255,0,0,0.5)"])
   .clamp(true);
 
 const precipColor = d3.scaleLinear()
-  .domain([0, 2, 10])
+  .domain([0,2,10])
   .range([
     "rgba(0,0,255,0)",
     "rgba(0,150,255,0.3)",
@@ -132,15 +126,12 @@ const precipColor = d3.scaleLinear()
   .clamp(true);
 
 const icingColor = d3.scaleLinear()
-  .domain([0, 1])
+  .domain([0,1])
   .range([
     "rgba(0,255,255,0)",
     "rgba(255,0,255,0.35)"
   ]);
 
-// ROUTE
-const start = {lat:43.6777, lon:-79.6248};
-const end   = {lat:45.4706, lon:-73.7408};
 const samples = 15;
 
 const levels = [
@@ -154,7 +145,37 @@ const levels = [
 
 function interp(a,b,t){ return a + (b-a)*t; }
 
-async function loadWeather(){
+// ========= LOAD CSV VIA FILE INPUT =========
+function loadAirportsFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+      const text = e.target.result;
+      const data = d3.csvParse(text);
+
+      const map = {};
+
+      data.forEach(d => {
+        if (d.ident) {
+          map[d.ident] = {
+            lat: +d.latitude_deg,
+            lon: +d.longitude_deg
+          };
+        }
+      });
+
+      resolve(map);
+    };
+
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+// ========= WEATHER =========
+async function loadWeather(start, end){
+
   let field = [];
 
   for(let i=0; i<samples; i++){
@@ -165,38 +186,47 @@ async function loadWeather(){
     const cVars = levels.map(l=>"cloudcover_"+l.p).join(",");
     const wVars = levels.map(l=>"windspeed_"+l.p).join(",");
     const tVars = levels.map(l=>"temperature_"+l.p).join(",");
-    const pVars = "precipitation";
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${cVars},${wVars},${tVars},${pVars}&wind_speed_unit=kn&forecast_days=1`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${cVars},${wVars},${tVars},precipitation&wind_speed_unit=kn&forecast_days=1`;
 
-    try {
-      const res = await fetch(url);
-      const data = await res.json();
+    const res = await fetch(url);
+    const data = await res.json();
 
-      let column = [];
+    let column = [];
 
-      levels.forEach(l=>{
-        column.push({
-          fl: l.fl,
-          cloud: data.hourly["cloudcover_"+l.p][0],
-          wind: data.hourly["windspeed_"+l.p][0],
-          temp: data.hourly["temperature_"+l.p][0]
-        });
+    levels.forEach(l=>{
+      column.push({
+        fl: l.fl,
+        cloud: data.hourly["cloudcover_"+l.p][0],
+        wind: data.hourly["windspeed_"+l.p][0],
+        temp: data.hourly["temperature_"+l.p][0]
       });
+    });
 
-      const precip = data.hourly.precipitation[0];
+    const precip = data.hourly.precipitation[0];
 
-      field.push({ time: t*70, column, precip });
-
-    } catch(e) {
-      console.error("Fetch error", e);
-    }
+    field.push({ time: t*70, column, precip });
   }
 
   drawWeather(field);
-  drawFreezingLine(field); // <-- Call freezing line draw
+  drawFreezingLine(field);
+  drawFlightPath();
+
+  // ICAO labels centered
+  g.append("text")
+    .attr("x", x(0))
+    .attr("y", height + 35)
+    .attr("text-anchor","middle")
+    .text(startICAO);
+
+  g.append("text")
+    .attr("x", x(70))
+    .attr("y", height + 35)
+    .attr("text-anchor","middle")
+    .text(endICAO);
 }
 
+// ========= DRAW WEATHER =========
 function drawWeather(field) {
   const dy = 20;
 
@@ -207,7 +237,9 @@ function drawWeather(field) {
     const xPos = x(c1.time);
     const rectWidth = x(c2.time) - x(c1.time) + 1;
 
-    for(let alt=0; alt<=500; alt+=dy){
+    for(let alt=0; alt<500; alt+=dy){
+
+      const topAlt = Math.min(alt+dy, 500);
 
       const getVals = (col, alt) => {
         for(let j=0; j<col.length-1; j++){
@@ -231,148 +263,100 @@ function drawWeather(field) {
       const avgTemp  = (v1.temp + v2.temp) / 2;
       const avgPrecip = (c1.precip + c2.precip) / 2;
 
-      // CLOUD
-      g.append("rect")
+      const rect = () => g.append("rect")
         .attr("x", xPos)
-        .attr("y", y(alt+dy))
+        .attr("y", y(topAlt))
         .attr("width", rectWidth)
-        .attr("height", Math.abs(y(alt) - y(alt+dy)))
-        .attr("fill", cloudColor(avgCloud));
+        .attr("height", Math.abs(y(alt) - y(topAlt)));
 
-      // PRECIP
-      if (avgPrecip > 0.1) {
-        g.append("rect")
-          .attr("x", xPos)
-          .attr("y", y(alt+dy))
-          .attr("width", rectWidth)
-          .attr("height", Math.abs(y(alt) - y(alt+dy)))
-          .attr("fill", precipColor(avgPrecip));
-      }
+      rect().attr("fill", cloudColor(avgCloud));
 
-      // TURBULENCE
-      if (avgWind > 25) {
-        g.append("rect")
-          .attr("x", xPos)
-          .attr("y", y(alt+dy))
-          .attr("width", rectWidth)
-          .attr("height", Math.abs(y(alt) - y(alt+dy)))
-          .attr("fill", turbColor(avgWind));
-      }
+      if (avgCloud > 60 && avgTemp <= 0 && avgTemp >= -20)
+        rect().attr("fill", icingColor(1));
 
-      // ICING
-      const icing =
-        avgCloud > 60 &&
-        avgTemp <= 0 &&
-        avgTemp >= -20;
+      if (avgPrecip > 0.1)
+        rect().attr("fill", precipColor(avgPrecip));
 
-      if (icing) {
-        g.append("rect")
-          .attr("x", xPos)
-          .attr("y", y(alt+dy))
-          .attr("width", rectWidth)
-          .attr("height", Math.abs(y(alt) - y(alt+dy)))
-          .attr("fill", icingColor(1));
-      }
+      if (avgWind > 25)
+        rect().attr("fill", turbColor(Math.min(avgWind,80)));
 
-      // TURB SYMBOL
       if (avgWind > 45 && i % 2 === 0 && alt % 60 === 0) {
         g.append("text")
           .attr("x", xPos + rectWidth/2)
           .attr("y", y(alt))
           .attr("class", "turb-symbol")
-          .attr("text-anchor", "middle")
           .text("^");
       }
 
-      // ICING SYMBOL
-      if (icing && i % 3 === 0 && alt % 80 === 0) {
+      if (avgCloud > 60 && avgTemp <= 0 && avgTemp >= -20 && i % 3 === 0 && alt % 80 === 0) {
         g.append("text")
           .attr("x", xPos + rectWidth/2)
           .attr("y", y(alt))
           .attr("class", "icing-symbol")
-          .attr("text-anchor", "middle")
           .text("❄");
       }
     }
   }
-
-  drawFlightPath();
 }
 
-/**
- * Calculates and draws the 0 degree isotherm line
- */
+// ========= FREEZING LINE =========
 function drawFreezingLine(field) {
-  const freezingPoints = [];
+  const pts = [];
 
   field.forEach(pt => {
     const col = pt.column;
-    let freezingAlt = null;
 
-    // Find the crossing point between 0 degrees
-    for (let j = 0; j < col.length - 1; j++) {
+    for (let j=0; j<col.length-1; j++) {
       const t1 = col[j].temp;
       const t2 = col[j+1].temp;
-      const fl1 = col[j].fl;
-      const fl2 = col[j+1].fl;
 
-      if ((t1 >= 0 && t2 <= 0) || (t1 <= 0 && t2 >= 0)) {
-        // Linear interpolation to find exact FL where temp is 0
-        // formula: y = y1 + (target - x1) * (y2 - y1) / (x2 - x1)
-        freezingAlt = fl1 + (0 - t1) * (fl2 - fl1) / (t2 - t1);
+      if ((t1>=0 && t2<=0) || (t1<=0 && t2>=0)) {
+        const fl = col[j].fl + (0 - t1)*(col[j+1].fl-col[j].fl)/(t2-t1);
+        pts.push({time:pt.time, alt:fl});
         break;
       }
     }
-
-    if (freezingAlt !== null) {
-      freezingPoints.push({ time: pt.time, alt: freezingAlt });
-    }
   });
 
-  const lineFunc = d3.line()
-    .x(d => x(d.time))
-    .y(d => y(d.alt))
-    .curve(d3.curveMonotoneX); // Smooth the line
-
   g.append("path")
-    .datum(freezingPoints)
-    .attr("class", "freezing-line")
-    .attr("d", lineFunc);
+    .datum(pts)
+    .attr("class","freezing-line")
+    .attr("d", d3.line().x(d=>x(d.time)).y(d=>y(d.alt)));
 }
 
+// ========= FLIGHT PATH =========
 function drawFlightPath() {
-  const flightData = [
+  const data = [
     {time:0, alt:0},
     {time:7, alt:350},
     {time:63, alt:350},
     {time:70, alt:0}
   ];
 
-  const line = d3.line()
-    .x(d=>x(d.time))
-    .y(d=>y(d.alt));
-
   g.append("path")
-    .datum(flightData)
+    .datum(data)
     .attr("class","flight-path")
-    .attr("d",line);
-
-  [[7, "TOC"], [63, "TOD"]].forEach(pt => {
-    g.append("circle")
-      .attr("cx",x(pt[0]))
-      .attr("cy",y(350))
-      .attr("r",4)
-      .attr("fill","red");
-
-    g.append("text")
-      .attr("x",x(pt[0]))
-      .attr("y",y(350)-10)
-      .attr("class","marker")
-      .text(pt[1]);
-  });
+    .attr("d", d3.line().x(d=>x(d.time)).y(d=>y(d.alt)));
 }
 
-loadWeather();
+// ========= INIT =========
+document.getElementById("fileInput").addEventListener("change", async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const airports = await loadAirportsFromFile(file);
+
+  const start = airports[startICAO];
+  const end   = airports[endICAO];
+
+  if (!start || !end) {
+    alert("Airport not found in CSV");
+    return;
+  }
+
+  loadWeather(start, end);
+});
+
 </script>
 </body>
 </html>
