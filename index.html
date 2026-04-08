@@ -52,7 +52,6 @@ body {
   Flight Weather Profile
 </div>
 
-<!-- FILE INPUT (NEW) -->
 <div style="padding:10px;">
   Load airports.csv:
   <input type="file" id="fileInput" accept=".csv" />
@@ -65,6 +64,7 @@ body {
 // ========= CONFIG =========
 const startICAO = "CYQT";
 const endICAO   = "CYUL";
+const flightMinutes = 120; // 🔥 CHANGE THIS FREELY
 // ==========================
 
 const svg = d3.select("#chart").style("background","white");
@@ -77,7 +77,13 @@ const g = svg.append("g")
   .attr("transform", `translate(${margin.left},${margin.top})`);
 
 const y = d3.scaleLinear().domain([0,500]).range([height,0]);
-const x = d3.scaleLinear().domain([-5,75]).range([0,width]);
+
+const x = d3.scaleLinear()
+  .domain([0, flightMinutes])
+  .range([0,width]);
+
+// ✅ 10 fixed ticks
+const tickValues = d3.range(0, 11).map(i => i * (flightMinutes / 10));
 
 // GRID
 g.append("g")
@@ -87,7 +93,12 @@ g.append("g")
 g.append("g")
   .attr("class","grid grid-vertical")
   .attr("transform",`translate(0,${height})`)
-  .call(d3.axisBottom(x).tickValues(d3.range(0,71,10)).tickSize(-height).tickFormat(""));
+  .call(
+    d3.axisBottom(x)
+      .tickValues(tickValues)
+      .tickSize(-height)
+      .tickFormat("")
+  );
 
 // AXES
 g.append("g")
@@ -99,7 +110,7 @@ g.append("g")
   .attr("transform",`translate(0,${height})`)
   .call(
     d3.axisBottom(x)
-      .tickValues(d3.range(0,71,10))
+      .tickValues(tickValues)
       .tickFormat(d=>{
         const t = new Date(startTime.getTime()+d*60000);
         return t.toISOString().substring(11,16)+"Z";
@@ -145,7 +156,7 @@ const levels = [
 
 function interp(a,b,t){ return a + (b-a)*t; }
 
-// ========= LOAD CSV VIA FILE INPUT =========
+// ========= FILE LOAD =========
 function loadAirportsFromFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -205,14 +216,13 @@ async function loadWeather(start, end){
 
     const precip = data.hourly.precipitation[0];
 
-    field.push({ time: t*70, column, precip });
+    field.push({ time: t * flightMinutes, column, precip });
   }
 
   drawWeather(field);
   drawFreezingLine(field);
   drawFlightPath();
 
-  // ICAO labels centered
   g.append("text")
     .attr("x", x(0))
     .attr("y", height + 35)
@@ -220,7 +230,7 @@ async function loadWeather(start, end){
     .text(startICAO);
 
   g.append("text")
-    .attr("x", x(70))
+    .attr("x", x(flightMinutes))
     .attr("y", height + 35)
     .attr("text-anchor","middle")
     .text(endICAO);
@@ -306,31 +316,50 @@ function drawFreezingLine(field) {
   field.forEach(pt => {
     const col = pt.column;
 
-    for (let j=0; j<col.length-1; j++) {
-      const t1 = col[j].temp;
-      const t2 = col[j+1].temp;
+    let freezingFL = null;
 
-      if ((t1>=0 && t2<=0) || (t1<=0 && t2>=0)) {
-        const fl = col[j].fl + (0 - t1)*(col[j+1].fl-col[j].fl)/(t2-t1);
-        pts.push({time:pt.time, alt:fl});
+    for (let j = 0; j < col.length - 1; j++) {
+      const t1 = col[j].temp;
+      const t2 = col[j + 1].temp;
+
+      if ((t1 >= 0 && t2 <= 0) || (t1 <= 0 && t2 >= 0)) {
+        const t = (0 - t1) / (t2 - t1);
+        freezingFL = col[j].fl + t * (col[j + 1].fl - col[j].fl);
         break;
       }
+    }
+
+    // If no crossing found, extend using nearest temps
+    if (freezingFL === null) {
+      if (col[0].temp > 0) {
+        freezingFL = col[col.length - 1].fl; // all above freezing
+      } else if (col[col.length - 1].temp < 0) {
+        freezingFL = col[0].fl; // all below freezing
+      }
+    }
+
+    if (freezingFL !== null) {
+      pts.push({ time: pt.time, alt: freezingFL });
     }
   });
 
   g.append("path")
     .datum(pts)
-    .attr("class","freezing-line")
-    .attr("d", d3.line().x(d=>x(d.time)).y(d=>y(d.alt)));
+    .attr("class", "freezing-line")
+    .attr("d", d3.line()
+      .x(d => x(d.time))
+      .y(d => y(d.alt))
+    );
 }
+
 
 // ========= FLIGHT PATH =========
 function drawFlightPath() {
   const data = [
     {time:0, alt:0},
-    {time:7, alt:350},
-    {time:63, alt:350},
-    {time:70, alt:0}
+    {time:flightMinutes * 0.1, alt:350},
+    {time:flightMinutes * 0.9, alt:350},
+    {time:flightMinutes, alt:0}
   ];
 
   g.append("path")
